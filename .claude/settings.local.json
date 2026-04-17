@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bundle exec *)",
+      "Bash(bundle install *)",
+      "Bash(ls *)",
+      "Bash(grep -r \"before.*:all\\\\|before.*:suite\\\\|class.*variable\\\\|@@\\\\|\\\\$\" /Users/hdamico/Documents/Workspace/action_params_contract/spec --include=\"*.rb\")",
+      "Bash(rubocop --version)",
+      "Bash(gem list *)",
+      "Bash(grep -E \"\\\\.rb$\")",
+      "Bash(ruby -I /Users/hdamico/Documents/Workspace/action_params_contract/lib -r action_params_contract -e \"puts DryRailsParamsActionLookup\")",
+      "Bash(find /Users/hdamico/Documents/Workspace/action_params_contract/lib -type f -name \"*.rb\" -exec wc -l {} +)",
+      "WebSearch",
+      "Read(//Users/hdamico/.claude/plugins/maia-skill/assets/**)"
+    ]
+  }
+}
