@@ -38,7 +38,7 @@ class ArticlesController < ApplicationController
   end
 
   def create
-    Article.create!(ActionParamsContract.filtered_params)
+    Article.create!(ActionParamsContract::Params.filter(params))
   end
 end
 ```
@@ -64,7 +64,7 @@ end
 def create
   return render(json: { errors: ActionParamsContract.params_errors }, status: :unprocessable_entity) if ActionParamsContract.params_errors.present?
 
-  Article.create!(ActionParamsContract.filtered_params)
+  Article.create!(ActionParamsContract::Params.filter(params))
 end
 ```
 
@@ -80,18 +80,23 @@ Scope rules to specific actions:
 
 These also work inside `rule` blocks, allowing cross-field rules to branch per action.
 
-## `filtered_params` and `root`
+## `Params.filter` and `root`
 
-`ActionParamsContract.filtered_params` returns the validated params with Rails internals (such as `format`, `controller`, `action`, and `locale`) removed. If your schema declares `root :key`, the sub-hash under that key is returned unwrapped, ready to use for a model:
+`ActionParamsContract::Params.filter(params)` runs the registered contract against the supplied hash and returns an `ActionController::Parameters` object whose contents are exactly the contract-validated keys, already permitted. `User.update(ActionParamsContract::Params.filter(params))` works without any additional `permit` call. If your schema declares `root :key`, the sub-hash under that key is returned unwrapped:
 
 ```ruby
 # Request body: { article: { title: "Hi", body: "..." } }
-ActionParamsContract.filtered_params # => { "title" => "Hi", "body" => "..." }
+ActionParamsContract::Params.filter(params)
+# => #<ActionController::Parameters {"title"=>"Hi", "body"=>"..."} permitted: true>
 ```
 
-The plain `params` also works inside the action, holding the same typed or changed hash on success.
+Inside a controller action both the controller class and the action name are pulled from the request context, so the implicit form above is enough. From a plain Ruby object (service, job, rake task) pass them explicitly:
 
-It does not negate or override the strong parameters; it can live alongside them. `params` is still a `ActionController::Parameters` instance, meaning you can call `params.require(:article).permit(:title, :body)` as usual if you choose. However, the difference now is that with your schema defined, you do not typically need this. Your values will be returned in a regular Hash by way of `filtered_params`, having been type-checked and type-coerced according to the defined schema, with any undeclared keys removed automatically.
+```ruby
+ActionParamsContract::Params.filter(params, controller: ArticlesController, action: :create)
+```
+
+If validation fails, `Params.filter` returns an empty permitted `Parameters` object, so downstream `Model.update(...)` calls become a safe no-op. The raise-vs-no-raise behavior is decided at install time via `validate!` vs `validate`; `Params.filter` just returns the validated view.
 
 ## Configuration
 
