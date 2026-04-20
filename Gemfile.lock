@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    action_params_contract (0.1.0)
+    action_params_contract (0.3.0)
       actionpack (>= 7.0)
       activesupport (>= 7.0)
       dry-schema (~> 1.13)

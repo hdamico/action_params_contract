@@ -5,7 +5,7 @@ RSpec.describe ActionParamsContract::DryExtensions do
     ActionParamsContract::DryExtensions::ValidationScope.enabled { example.run }
   end
 
-  describe "default macro with falsy values" do
+  describe ".default with falsy values" do
     before do
       stub_const("ActionParamsContract::Contracts::DefaultFalsySchema", Module.new)
 
@@ -41,7 +41,7 @@ RSpec.describe ActionParamsContract::DryExtensions do
     end
   end
 
-  describe "default macro with a mutable Array value" do
+  describe ".default with a mutable Array value" do
     before do
       stub_const("ActionParamsContract::Contracts::DefaultMutableSchema", Module.new)
 
@@ -64,7 +64,7 @@ RSpec.describe ActionParamsContract::DryExtensions do
     end
   end
 
-  describe "default macro with a Proc value" do
+  describe ".default with a Proc value" do
     before do
       stub_const("ActionParamsContract::Contracts::DefaultProcSchema", Module.new)
       stub_const("ActionParamsContract::Contracts::DefaultCounterSchema", Module.new)
@@ -101,7 +101,7 @@ RSpec.describe ActionParamsContract::DryExtensions do
     end
   end
 
-  describe "default macro chained on a required key" do
+  describe ".default chained on a required key" do
     before { stub_const("ActionParamsContract::Contracts::DefaultOnRequiredSchema", Module.new) }
 
     context "when the schema declares required(:x).filled(...).default(y)" do
@@ -128,20 +128,24 @@ RSpec.describe ActionParamsContract::DryExtensions do
     end
     let(:evaluator) { evaluator_klass.new }
 
-    describe "#on_action without a block" do
-      it "is a no-op" do
-        expect { evaluator.on_action(:create) }.not_to raise_error
+    describe "#on_action" do
+      context "without a block" do
+        it "is a no-op" do
+          expect { evaluator.on_action(:create) }.not_to raise_error
+        end
       end
     end
 
-    describe "#on_actions without a block" do
-      it "is a no-op across every action name" do
-        expect { evaluator.on_actions(:create, :update, :destroy) }.not_to raise_error
+    describe "#on_actions" do
+      context "without a block" do
+        it "is a no-op across every action name" do
+          expect { evaluator.on_actions(:create, :update, :destroy) }.not_to raise_error
+        end
       end
     end
   end
 
-  describe "current_action? without thread-local context" do
+  describe "#current_action? without thread-local context" do
     after { ActionParamsContract::RequestContext.store[ActionParamsContract::RequestContext::ACTION_KEY] = nil }
 
     before do
@@ -174,59 +178,6 @@ RSpec.describe ActionParamsContract::DryExtensions do
 
         expect(result.errors.to_h.keys).not_to include(:title)
       end
-    end
-  end
-
-  describe "root DSL with duplicate declarations" do
-    before { stub_const("ActionParamsContract::Contracts::DuplicateRootSchema", Module.new) }
-
-    context "when the same key is declared twice" do
-      it "is a no-op (idempotent)" do
-        ActionParamsContract::ContractGenerator.call("DuplicateRootSchema") do
-          params do
-            root :article
-            root :article
-            optional(:anything).maybe(:string)
-          end
-        end
-
-        expect { ActionParamsContract::Contracts::DuplicateRootSchema.build_contract }.not_to raise_error
-      end
-    end
-
-    context "when two distinct keys are declared" do
-      it "raises ArgumentError pointing at the conflict" do
-        ActionParamsContract::ContractGenerator.call("DuplicateRootSchema") do
-          params do
-            root :article
-            root :post
-            optional(:anything).maybe(:string)
-          end
-        end
-
-        expect { ActionParamsContract::Contracts::DuplicateRootSchema.build_contract }
-          .to raise_error(ArgumentError, /root :article already declared/)
-      end
-    end
-  end
-
-  describe "root DSL builds in isolation across separate contracts" do
-    before do
-      stub_const("ActionParamsContract::Contracts::RootIsolationASchema", Module.new)
-      stub_const("ActionParamsContract::Contracts::RootIsolationBSchema", Module.new)
-
-      ActionParamsContract::ContractGenerator.call("RootIsolationASchema") do
-        params { root :one }
-      end
-      ActionParamsContract::ContractGenerator.call("RootIsolationBSchema") do
-        params { root :two }
-      end
-    end
-
-    it "resets the root key per build so prior builds do not raise ConflictingRootError" do
-      ActionParamsContract::Contracts::RootIsolationASchema.build_contract
-
-      expect { ActionParamsContract::Contracts::RootIsolationBSchema.build_contract }.not_to raise_error
     end
   end
 end

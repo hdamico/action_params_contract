@@ -27,68 +27,57 @@ class CollisionAWidgetsController < ApplicationController
 end
 
 RSpec.describe ActionParamsContract do
-  describe ".validate! on a namespaced controller" do
-    it "joins :: with _ to keep namespaces distinguishable" do
-      expect(ActionParamsContract::Contracts.const_defined?(:Api_V2_NamespacedUsersControllerSchema, false)).to be(true)
-    end
-
-    it "does not pollute the top-level namespace" do
-      expect(Object.const_defined?(:Api_V2_NamespacedUsersControllerSchema, false)).to be(false)
-    end
-  end
-
-  describe ".validate! constant naming under namespace collision" do
-    it "produces distinct schema constants for nested vs flat names with the same letters", :aggregate_failures do
-      expect(ActionParamsContract::Contracts.const_defined?(:CollisionA_WidgetsControllerSchema, false)).to be(true)
-      expect(ActionParamsContract::Contracts.const_defined?(:CollisionAWidgetsControllerSchema, false)).to be(true)
-    end
-
-    it "keeps each controller's schema rules independent", :aggregate_failures do
-      nested_errors = ActionParamsContract::Contracts::CollisionA_WidgetsControllerSchema.build_contract.new.call({}).errors.to_h
-      flat_errors   = ActionParamsContract::Contracts::CollisionAWidgetsControllerSchema.build_contract.new.call({}).errors.to_h
-
-      expect(nested_errors.keys).to contain_exactly(:from_a)
-      expect(flat_errors.keys).to contain_exactly(:from_flat)
-    end
-  end
-
-  describe ".validate with no block" do
-    it "does not install the validation callback on the controller" do
-      controller = Class.new(ApplicationController) do
-        def self.name = "NoBlockValidateController"
+  describe ".validate!" do
+    context "when defined inside a namespaced controller" do
+      it "joins :: with _ to keep namespaces distinguishable" do
+        expect(ActionParamsContract::Contracts.const_defined?(:Api_V2_NamespacedUsersControllerSchema,
+                                                              false)).to be(true)
       end
 
-      controller.class_eval { ActionParamsContract.validate }
-
-      expect(ActionParamsContract::ControllerInstaller.installed?(controller)).to be(false)
+      it "does not pollute the top-level namespace" do
+        expect(Object.const_defined?(:Api_V2_NamespacedUsersControllerSchema, false)).to be(false)
+      end
     end
-  end
 
-  describe ".validate! with no block" do
-    it "does not install the validation callback on the controller" do
-      controller = Class.new(ApplicationController) do
-        def self.name = "NoBlockValidateBangController"
+    context "when two controllers have colliding constant names" do
+      it "produces distinct schema constants for nested vs flat names with the same letters", :aggregate_failures do
+        expect(ActionParamsContract::Contracts.const_defined?(:CollisionA_WidgetsControllerSchema, false)).to be(true)
+        expect(ActionParamsContract::Contracts.const_defined?(:CollisionAWidgetsControllerSchema, false)).to be(true)
       end
 
-      controller.class_eval { ActionParamsContract.validate! }
+      it "keeps each controller's schema rules independent", :aggregate_failures do
+        nested_errors = ActionParamsContract::Contracts::CollisionA_WidgetsControllerSchema.build_contract.new.call({}).errors.to_h
+        flat_errors   = ActionParamsContract::Contracts::CollisionAWidgetsControllerSchema.build_contract.new.call({}).errors.to_h
 
-      expect(ActionParamsContract::ControllerInstaller.installed?(controller)).to be(false)
+        expect(nested_errors.keys).to contain_exactly(:from_a)
+        expect(flat_errors.keys).to contain_exactly(:from_flat)
+      end
     end
-  end
 
-  describe ".validate! on an anonymous controller class" do
-    it "raises a clear ArgumentError instead of a cryptic NoMethodError" do
-      controller = Class.new(ApplicationController)
-
-      expect do
-        controller.class_eval do
-          ActionParamsContract.validate! { params { required(:a).filled(:string) } }
+    context "without a block" do
+      it "does not install the validation callback on the controller" do
+        controller = Class.new(ApplicationController) do
+          def self.name = "NoBlockValidateBangController"
         end
-      end.to raise_error(ArgumentError, /named controller class/)
-    end
-  end
 
-  describe ".validate! called from a non-controller receiver" do
+        controller.class_eval { ActionParamsContract.validate! }
+
+        expect(ActionParamsContract::ControllerInstaller.installed?(controller)).to be(false)
+      end
+    end
+
+    context "when the receiver is an anonymous controller class" do
+      it "raises a clear ArgumentError instead of a cryptic NoMethodError" do
+        controller = Class.new(ApplicationController)
+
+        expect do
+          controller.class_eval do
+            ActionParamsContract.validate! { params { required(:a).filled(:string) } }
+          end
+        end.to raise_error(ArgumentError, /named controller class/)
+      end
+    end
+
     context "when called from a plain class body (not ActionController)" do
       it "raises ArgumentError pointing at the wrong receiver" do
         expect do
@@ -108,6 +97,20 @@ RSpec.describe ActionParamsContract do
             ActionParamsContract.validate! { params { required(:a).filled(:string) } }
           end
         end.to raise_error(ArgumentError, /Rails controller class body/)
+      end
+    end
+  end
+
+  describe ".validate" do
+    context "without a block" do
+      it "does not install the validation callback on the controller" do
+        controller = Class.new(ApplicationController) do
+          def self.name = "NoBlockValidateController"
+        end
+
+        controller.class_eval { ActionParamsContract.validate }
+
+        expect(ActionParamsContract::ControllerInstaller.installed?(controller)).to be(false)
       end
     end
   end

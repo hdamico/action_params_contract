@@ -22,7 +22,9 @@ RSpec.describe ActionParamsContract::InvalidParamsError do
     end
   end
 
-  it "descends from StandardError so controllers can rescue_from it" do
-    expect(described_class).to be < StandardError
+  describe "ancestry" do
+    it "descends from StandardError so controllers can rescue_from it" do
+      expect(described_class).to be < StandardError
+    end
   end
 end

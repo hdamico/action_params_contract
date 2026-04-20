@@ -32,7 +32,6 @@ module ActionParamsContract
         mod.define_singleton_method(:schema_block) { block }
 
         mod.define_singleton_method(:build_contract) do
-          ActionParamsContract::RequestContext.current_root = nil
           klass = Class.new(Dry::Validation::Contract)
           klass.instance_eval(&schema_block)
           klass

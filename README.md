@@ -1,12 +1,15 @@
 # ActionParamsContract
 
-Declarative Rails controller parameter validation, powered by [dry-validation](https://dry-rb.org/gems/dry-validation). You can define a schema next to your actions. The gem installs an `around_action`, changes params to the declared types, and raises a structured error or exposes the failures for you to handle.
+Declarative parameter validation for Rails controllers, built on [dry-validation](https://dry-rb.org/gems/dry-validation). You declare a schema next to your actions and the gem installs an `around_action` that coerces params to the declared types. If validation fails you can either raise or collect the errors and handle them yourself.
 
 ## Requirements
 
-Ruby ≥ 3.1, Rails ≥ 7.0.
+- Ruby 3.1+
+- Rails 7.0+
 
 ## Installation
+
+Add this to your Gemfile:
 
 ```ruby
 gem "action_params_contract"
@@ -16,14 +19,12 @@ Then run `bundle install`.
 
 ## Usage
 
-Declare the schema in the controller body. If successful, `params` is replaced with the typed or changed hash. If it fails, `ActionParamsContract::InvalidParamsError` is raised before the action runs.
+Declare the schema in the controller body. If validation passes, `params` is replaced with the coerced hash. If it fails, `ActionParamsContract::InvalidParamsError` is raised before the action runs.
 
 ```ruby
 class ArticlesController < ApplicationController
   ActionParamsContract.validate! do
     params do
-      root :article
-
       optional(:page).filled(:integer).default(1)
 
       on_create do
@@ -38,7 +39,7 @@ class ArticlesController < ApplicationController
   end
 
   def create
-    Article.create!(ActionParamsContract::Params.filter(params))
+    Article.create!(ActionParamsContract::Params.cast(params)[:article])
   end
 end
 ```
@@ -51,10 +52,12 @@ rescue_from ActionParamsContract::InvalidParamsError do |exception|
 end
 ```
 
-## Strict vs. Soft
+## Strict vs. soft
+
+Two modes, pick one per controller:
 
 - `validate!` raises `InvalidParamsError` on failure, so the action never runs.
-- `validate` records errors in the controller and lets the action run. You can inspect them using `ActionParamsContract.params_errors`.
+- `validate` records errors and lets the action run. Read them via `ActionParamsContract.params_errors`.
 
 ```ruby
 ActionParamsContract.validate do
@@ -62,41 +65,43 @@ ActionParamsContract.validate do
 end
 
 def create
-  return render(json: { errors: ActionParamsContract.params_errors }, status: :unprocessable_entity) if ActionParamsContract.params_errors.present?
+  if ActionParamsContract.params_errors.present?
+    return render(json: { errors: ActionParamsContract.params_errors }, status: :unprocessable_entity)
+  end
 
-  Article.create!(ActionParamsContract::Params.filter(params))
+  Article.create!(ActionParamsContract::Params.cast(params))
 end
 ```
 
-A controller can register **only one**, not both. A second call or mixing `validate` and `validate!` raises `DuplicateRegistrationError` at load time.
+Mixing the two, or calling either twice in the same controller, raises `DuplicateRegistrationError` at load time.
 
-## Action-Conditional DSL
+## Action-conditional DSL
 
 Scope rules to specific actions:
 
 - `on_create { ... }`, `on_update { ... }`, `on_index { ... }`, `on_destroy { ... }`
 - `on_actions(:create, :update) { ... }` for multiple actions
-- `current_action?(:create)` as a predicate form
+- `current_action?(:create)` as a predicate
 
-These also work inside `rule` blocks, allowing cross-field rules to branch per action.
+These also work inside `rule` blocks, so cross-field rules can branch per action.
 
-## `Params.filter` and `root`
+## `Params.cast`
 
-`ActionParamsContract::Params.filter(params)` runs the registered contract against the supplied hash and returns an `ActionController::Parameters` object whose contents are exactly the contract-validated keys, already permitted. `User.update(ActionParamsContract::Params.filter(params))` works without any additional `permit` call. If your schema declares `root :key`, the sub-hash under that key is returned unwrapped:
-
-```ruby
-# Request body: { article: { title: "Hi", body: "..." } }
-ActionParamsContract::Params.filter(params)
-# => #<ActionController::Parameters {"title"=>"Hi", "body"=>"..."} permitted: true>
-```
-
-Inside a controller action both the controller class and the action name are pulled from the request context, so the implicit form above is enough. From a plain Ruby object (service, job, rake task) pass them explicitly:
+`ActionParamsContract::Params.cast(params)` runs the registered contract against the given hash and returns an `ActionController::Parameters` object containing only the validated keys, already permitted. That means `Model.update(ActionParamsContract::Params.cast(params))` works without a separate `permit` call.
 
 ```ruby
-ActionParamsContract::Params.filter(params, controller: ArticlesController, action: :create)
+# Request body: { article: { title: "Hi", body: "..." }, page: "2" }
+ActionParamsContract::Params.cast(params)
+# => #<ActionController::Parameters {"article"=>{"title"=>"Hi", "body"=>"..."}, "page"=>2} permitted: true>
 ```
 
-If validation fails, `Params.filter` returns an empty permitted `Parameters` object, so downstream `Model.update(...)` calls become a safe no-op. The raise-vs-no-raise behavior is decided at install time via `validate!` vs `validate`; `Params.filter` just returns the validated view.
+Inside a controller action the controller class and action name are read from the request context, so you don't need to pass them. From a service, job, or rake task, pass them explicitly:
+
+```ruby
+ActionParamsContract::Params.cast(params, controller: ArticlesController, action: :create)
+```
+
+When validation fails, `cast` returns an empty permitted `Parameters` object. Whether a failure raises is decided at install time by `validate!` vs `validate`; `cast` itself just returns the validated view.
 
 ## Configuration
 
@@ -109,14 +114,14 @@ ActionParamsContract.configure do |config|
 end
 ```
 
-## Error Tracking
+## Error tracking
 
-`InvalidParamsError` uses a stable message (`"Params failed validation"`), grouping occurrences into a single issue in tools like Sentry instead of breaking them down per input. Attach `#errors` as structured context in your rescue handler:
+`InvalidParamsError` carries the failures on `#errors`. You can attach them as context in your rescue handler:
 
 ```ruby
 rescue_from ActionParamsContract::InvalidParamsError do |exception|
   Sentry.with_scope do |scope|
-    scope.set_context("params_validation", { errors: exception.errors })
+    scope.set_context("params_validation", errors: exception.errors)
     scope.set_tags(controller: controller_path, action: action_name)
     Sentry.capture_exception(exception)
   end
@@ -124,12 +129,6 @@ rescue_from ActionParamsContract::InvalidParamsError do |exception|
   render json: { errors: exception.errors }, status: :bad_request
 end
 ```
-
-Equivalents include: `Bugsnag.notify(exception) { |r| r.add_metadata(:params_validation, exception.errors) }`, `Honeybadger.notify(exception, context: { errors: exception.errors })`, and `Rollbar.error(exception, errors: exception.errors)`. Keep `exception.errors` out of the message itself, as it can disrupt grouping.
-
-## What This Gem Is Not
-
-Validation semantics, types, predicates, `rule` blocks, and error formatting are all part of dry-validation. Refer to its [documentation](https://dry-rb.org/gems/dry-validation/) for the complete reference. This gem provides Rails integration, action conditionals, `root` unwrapping, and the `default` macro on top.
 
 ## License
 

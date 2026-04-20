@@ -90,23 +90,6 @@ class SoftValidationController < ApplicationController
   end
 end
 
-class RootObjectController < ApplicationController
-  ActionParamsContract.validate! do
-    params do
-      root :article
-
-      required(:article).hash do
-        required(:title).filled(:string)
-      end
-    end
-  end
-
-  def create
-    filtered = ActionParamsContract::Params.filter(params)
-    render json: { filtered_params: filtered.to_h, permitted: filtered.permitted? }
-  end
-end
-
 class StripNonSchemaController < ApplicationController
   ActionParamsContract.validate! do
     params do
@@ -143,7 +126,7 @@ class SoftDefaultsController < ApplicationController
   end
 end
 
-class NoRootObjectController < ApplicationController
+class CastController < ApplicationController
   ActionParamsContract.validate! do
     params do
       required(:name).filled(:string)
@@ -151,31 +134,12 @@ class NoRootObjectController < ApplicationController
   end
 
   def create
-    filtered = ActionParamsContract::Params.filter(params)
-    render json: { filtered_params: filtered.to_h, permitted: filtered.permitted? }
+    cast = ActionParamsContract::Params.cast(params)
+    render json: { cast_params: cast.to_h, permitted: cast.permitted? }
   end
 end
 
-class SoftRootObjectController < ApplicationController
-  ActionParamsContract.validate do
-    params do
-      root :article
-
-      required(:article).hash do
-        required(:title).filled(:string)
-      end
-    end
-  end
-
-  def create
-    render json: {
-      filtered_params: ActionParamsContract::Params.filter(params).to_h,
-      errors: ActionParamsContract.params_errors,
-    }
-  end
-end
-
-class SoftFilteredParamsController < ApplicationController
+class SoftCastController < ApplicationController
   ActionParamsContract.validate do
     params do
       required(:name).filled(:string)
@@ -184,7 +148,7 @@ class SoftFilteredParamsController < ApplicationController
 
   def create
     render json: {
-      filtered_params: ActionParamsContract::Params.filter(params).to_h,
+      cast_params: ActionParamsContract::Params.cast(params).to_h,
       errors: ActionParamsContract.params_errors,
     }
   end
@@ -235,14 +199,12 @@ RSpec.describe ActionParamsContract do
       resources :default_value, only: [:index], controller: "default_value"
       resources :multi_action, only: %i[index create update destroy], controller: "multi_action"
       resources :soft_validation, only: %i[create], controller: "soft_validation"
-      resources :root_object, only: %i[create], controller: "root_object"
       resources :strip_non_schema, only: %i[create], controller: "strip_non_schema"
       resources :destroy_required, only: %i[destroy], controller: "destroy_required"
       resources :soft_defaults, only: %i[index], controller: "soft_defaults"
-      resources :no_root_object, only: %i[create], controller: "no_root_object"
+      resources :cast, only: %i[create], controller: "cast"
       resources :custom_whitelist, only: %i[create], controller: "custom_whitelist"
-      resources :soft_root_object, only: %i[create], controller: "soft_root_object"
-      resources :soft_filtered_params, only: %i[create], controller: "soft_filtered_params"
+      resources :soft_cast, only: %i[create], controller: "soft_cast"
       resources :inherited_quiet, only: %i[create], controller: "inherited_quiet"
       resources :cross_field_rule, only: %i[create], controller: "cross_field_rule"
     end
@@ -252,7 +214,7 @@ RSpec.describe ActionParamsContract do
     Rails.application.routes_reloader.reload!
   end
 
-  describe "POST create with required param validation" do
+  describe "POST create" do
     context "when the required param is present" do
       before { post "/basic_validation", params: { name: "Alice" } }
 
@@ -277,9 +239,7 @@ RSpec.describe ActionParamsContract do
         expect(response).to have_http_status(:bad_request)
       end
     end
-  end
 
-  describe "POST create with optional param validation" do
     context "when the optional param is present and valid" do
       before { post "/basic_validation", params: { name: "Alice", age: 30 } }
 
@@ -448,34 +408,6 @@ RSpec.describe ActionParamsContract do
     end
   end
 
-  describe "root :key DSL for filter_params" do
-    context "when the schema declares root :article and params are valid" do
-      before { post "/root_object", params: { article: { title: "Hello" } } }
-
-      it "filter_params returns a permitted Parameters object scoped to the root", :aggregate_failures do
-        expect(response).to have_http_status(:ok)
-        expect(body["filtered_params"]).to eq({ "title" => "Hello" })
-        expect(body["permitted"]).to be(true)
-      end
-    end
-
-    context "when nested required param is missing" do
-      before { post "/root_object", params: { article: {} } }
-
-      it "responds bad_request via InvalidParamsError" do
-        expect(response).to have_http_status(:bad_request)
-      end
-    end
-
-    context "when the entire root param is missing" do
-      before { post "/root_object", params: {} }
-
-      it "responds bad_request via InvalidParamsError" do
-        expect(response).to have_http_status(:bad_request)
-      end
-    end
-  end
-
   describe "duplicate schema registration" do
     context "when validate is called twice on the same controller" do
       let(:controller) do
@@ -564,65 +496,34 @@ RSpec.describe ActionParamsContract do
     end
   end
 
-  describe "filter_params without the root DSL" do
-    context "when no root is declared on the schema" do
-      before { post "/no_root_object", params: { name: "Alice" } }
+  describe "Params.cast in strict mode" do
+    context "when the schema accepts the input" do
+      before { post "/cast", params: { name: "Alice" } }
 
       it "returns the validated hash as a permitted Parameters object", :aggregate_failures do
-        expect(body["filtered_params"]).to eq("name" => "Alice")
+        expect(body["cast_params"]).to eq("name" => "Alice")
         expect(body["permitted"]).to be(true)
       end
     end
   end
 
-  describe "soft-mode filter_params with non-hash root input" do
-    context "when the client sends the root key as a scalar" do
-      before { post "/soft_root_object", params: { article: "hello" } }
-
-      it "returns {} from filter_params instead of raising", :aggregate_failures do
-        expect(response).to have_http_status(:ok)
-        expect(body["filtered_params"]).to eq({})
-        expect(body["errors"]).to include("article")
-      end
-    end
-
-    context "when the root key is omitted entirely" do
-      before { post "/soft_root_object", params: {} }
-
-      it "returns {} from filter_params" do
-        expect(response).to have_http_status(:ok)
-        expect(body["filtered_params"]).to eq({})
-      end
-    end
-
-    context "when the root key is a valid hash" do
-      before { post "/soft_root_object", params: { article: { title: "Hello" } } }
-
-      it "returns the unwrapped sub-hash with no errors", :aggregate_failures do
-        expect(response).to have_http_status(:ok)
-        expect(body["filtered_params"]).to eq("title" => "Hello")
-        expect(body["errors"]).to be_blank
-      end
-    end
-  end
-
-  describe "soft-mode filter_params when validation failed" do
+  describe "Params.cast in soft mode" do
     context "when the schema rejects the input" do
-      before { post "/soft_filtered_params", params: { evil: "payload" } }
+      before { post "/soft_cast", params: { evil: "payload" } }
 
-      it "returns {} so attacker-controlled keys are not surfaced as 'filtered'", :aggregate_failures do
+      it "returns {} so attacker-controlled keys are not surfaced as cast", :aggregate_failures do
         expect(response).to have_http_status(:ok)
-        expect(body["filtered_params"]).to eq({})
+        expect(body["cast_params"]).to eq({})
         expect(body["errors"]).to include("name")
       end
     end
 
     context "when the schema accepts the input" do
-      before { post "/soft_filtered_params", params: { name: "Alice" } }
+      before { post "/soft_cast", params: { name: "Alice" } }
 
-      it "returns the validated, filtered view" do
+      it "returns the validated hash", :aggregate_failures do
         expect(response).to have_http_status(:ok)
-        expect(body["filtered_params"]).to eq("name" => "Alice")
+        expect(body["cast_params"]).to eq("name" => "Alice")
       end
     end
   end

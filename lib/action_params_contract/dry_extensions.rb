@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require_relative "errors/conflicting_root_error"
 require_relative "errors/default_on_required_error"
 require_relative "dry_extensions/controller_action_dsl"
 require_relative "dry_extensions/evaluator"

@@ -5,37 +5,35 @@ RSpec.describe ActionParamsContract::RequestContext do
   let(:action_key)     { described_class::ACTION_KEY }
   let(:controller_key) { described_class::CONTROLLER_KEY }
 
-  describe ".around exception safety" do
+  describe ".around" do
     after { described_class.pop }
 
-    it "clears the action when the block raises" do
-      controller = instance_double(ApplicationController, action_name: "create")
+    context "when the block raises" do
+      it "clears the action" do
+        controller = instance_double(ApplicationController, action_name: "create")
 
-      expect do
-        described_class.around(controller) { raise "boom" }
-      end.to raise_error(RuntimeError, "boom")
+        expect do
+          described_class.around(controller) { raise "boom" }
+        end.to raise_error(RuntimeError, "boom")
 
-      expect(store[action_key]).to be_nil
+        expect(store[action_key]).to be_nil
+      end
+
+      it "clears the controller reference" do
+        controller = instance_double(ApplicationController, action_name: "create")
+
+        expect do
+          described_class.around(controller) { raise "boom" }
+        end.to raise_error(RuntimeError, "boom")
+
+        expect(store[controller_key]).to be_nil
+      end
     end
 
-    it "clears the controller reference when the block raises" do
-      controller = instance_double(ApplicationController, action_name: "create")
+    context "when nested .around blocks exit cleanly" do
+      let(:outer_controller) { instance_double(ApplicationController, action_name: "create") }
+      let(:inner_controller) { instance_double(ApplicationController, action_name: "update") }
 
-      expect do
-        described_class.around(controller) { raise "boom" }
-      end.to raise_error(RuntimeError, "boom")
-
-      expect(store[controller_key]).to be_nil
-    end
-  end
-
-  describe "nested .around calls" do
-    after { described_class.pop }
-
-    let(:outer_controller) { instance_double(ApplicationController, action_name: "create") }
-    let(:inner_controller) { instance_double(ApplicationController, action_name: "update") }
-
-    context "when a nested block exits cleanly" do
       it "restores the outer controller and action", :aggregate_failures do
         described_class.around(outer_controller) do
           described_class.around(inner_controller) do
@@ -48,7 +46,10 @@ RSpec.describe ActionParamsContract::RequestContext do
       end
     end
 
-    context "when the nested block raises" do
+    context "when a nested .around block raises" do
+      let(:outer_controller) { instance_double(ApplicationController, action_name: "create") }
+      let(:inner_controller) { instance_double(ApplicationController, action_name: "update") }
+
       it "still restores the outer controller and action", :aggregate_failures do
         described_class.around(outer_controller) do
           expect do
@@ -62,33 +63,39 @@ RSpec.describe ActionParamsContract::RequestContext do
     end
   end
 
-  describe "IsolatedExecutionState action isolation" do
+  describe ".store" do
     after { store[action_key] = nil }
 
-    it "stores and reads action from isolated storage" do
-      store[action_key] = :create
+    context "when writing and reading the action key" do
+      it "stores and reads action from isolated storage" do
+        store[action_key] = :create
 
-      expect(store[action_key]).to eq(:create)
+        expect(store[action_key]).to eq(:create)
+      end
     end
 
-    it "isolates action between threads", :aggregate_failures do
-      store[action_key] = :create
+    context "when accessed from a different thread" do
+      it "isolates action between threads", :aggregate_failures do
+        store[action_key] = :create
 
-      thread_value = Thread.new { store[action_key] }.value
+        thread_value = Thread.new { store[action_key] }.value
 
-      expect(thread_value).to be_nil
-      expect(store[action_key]).to eq(:create)
+        expect(thread_value).to be_nil
+        expect(store[action_key]).to eq(:create)
+      end
     end
 
-    it "does not leak state between sequential operations" do
-      store[action_key] = :create
-      store[action_key] = nil
+    context "when the action key is cleared" do
+      it "does not leak state between sequential operations" do
+        store[action_key] = :create
+        store[action_key] = nil
 
-      expect(store[action_key]).to be_nil
+        expect(store[action_key]).to be_nil
+      end
     end
   end
 
-  describe "Concurrent contract building" do
+  describe ".build_contract concurrency" do
     before do
       stub_const("ActionParamsContract::Contracts::ConcurrentTestSchema", Module.new)
 
@@ -99,32 +106,34 @@ RSpec.describe ActionParamsContract::RequestContext do
       end
     end
 
-    it "builds independent contract classes across threads", :aggregate_failures do
-      contracts = Array.new(5) do
-        Thread.new { ActionParamsContract::Contracts::ConcurrentTestSchema.build_contract }
-      end.map(&:value)
+    context "when invoked concurrently from multiple threads" do
+      it "builds independent contract classes across threads", :aggregate_failures do
+        contracts = Array.new(5) do
+          Thread.new { ActionParamsContract::Contracts::ConcurrentTestSchema.build_contract }
+        end.map(&:value)
 
-      expect(contracts.uniq(&:object_id).size).to eq(5)
-      expect(contracts).to all(be < Dry::Validation::Contract)
-    end
+        expect(contracts.uniq(&:object_id).size).to eq(5)
+        expect(contracts).to all(be < Dry::Validation::Contract)
+      end
 
-    it "validates correctly across concurrent threads", :aggregate_failures do
-      results = Array.new(10) do |index|
-        Thread.new do
-          contract_class = ActionParamsContract::Contracts::ConcurrentTestSchema.build_contract
-          input = index.even? ? { name: "Alice" } : { name: "" }
-          contract_class.new.call(input)
-        end
-      end.map(&:value)
+      it "validates correctly across concurrent threads", :aggregate_failures do
+        results = Array.new(10) do |index|
+          Thread.new do
+            contract_class = ActionParamsContract::Contracts::ConcurrentTestSchema.build_contract
+            input = index.even? ? { name: "Alice" } : { name: "" }
+            contract_class.new.call(input)
+          end
+        end.map(&:value)
 
-      successes, failures = results.partition(&:success?)
+        successes, failures = results.partition(&:success?)
 
-      expect(successes.size).to eq(5)
-      expect(failures.size).to eq(5)
+        expect(successes.size).to eq(5)
+        expect(failures.size).to eq(5)
+      end
     end
   end
 
-  describe "Concurrent action-conditional validation" do
+  describe ".build_contract action-conditional concurrency" do
     before do
       stub_const("ActionParamsContract::Contracts::ActionThreadTestSchema", Module.new)
 
@@ -155,55 +164,79 @@ RSpec.describe ActionParamsContract::RequestContext do
       end
     end
 
-    it "applies correct action-conditional rules per thread", :aggregate_failures do
-      results = Array.new(10) { |index| run_action_conditional_thread(index) }.map(&:value)
+    context "when threads set different actions concurrently" do
+      it "applies correct action-conditional rules per thread", :aggregate_failures do
+        results = Array.new(10) { |index| run_action_conditional_thread(index) }.map(&:value)
 
-      create_results = results.select { |result| result[:action] == :create }
-      update_results = results.select { |result| result[:action] == :update }
+        create_results = results.select { |result| result[:action] == :create }
+        update_results = results.select { |result| result[:action] == :update }
 
-      expect(create_results).to all(include(success: true))
-      expect(update_results).to all(include(success: true))
+        expect(create_results).to all(include(success: true))
+        expect(update_results).to all(include(success: true))
+      end
     end
   end
 
-  describe "Concurrent root :key evaluation" do
-    let(:root_key)     { described_class::ROOT_KEY }
-    let(:thread_count) { 5 }
+  describe ".around reentrant Params.cast" do
+    let(:thread_count) { 8 }
 
     before do
-      thread_count.times do |index|
-        stub_const("ActionParamsContract::Contracts::ConcurrentRootSchema#{index}", Module.new)
+      stub_const("ReentrantOuterController", Class.new { def self.name = "ReentrantOuterController" })
+      stub_const("ReentrantInnerController", Class.new { def self.name = "ReentrantInnerController" })
 
-        ActionParamsContract::ContractGenerator.call("ConcurrentRootSchema#{index}") do
-          params do
-            root :"object_#{index}"
-            optional(:ignored).maybe(:string)
-          end
-        end
+      stub_const("ActionParamsContract::Contracts::ReentrantOuterControllerSchema", Module.new)
+      stub_const("ActionParamsContract::Contracts::ReentrantInnerControllerSchema", Module.new)
+
+      ActionParamsContract::ContractGenerator.call("ReentrantOuterControllerSchema") do
+        params { required(:name).filled(:string) }
+      end
+
+      ActionParamsContract::ContractGenerator.call("ReentrantInnerControllerSchema") do
+        params { required(:code).filled(:integer) }
       end
     end
 
-    after { store[root_key] = nil }
+    def outer_controller_instance
+      ReentrantOuterController.new.tap do |instance|
+        instance.define_singleton_method(:action_name) { "create" }
+      end
+    end
 
-    def run_root_evaluation_thread(index, barrier)
+    def run_reentrant_thread(index, barrier)
       Thread.new do
-        barrier.pop
-        ActionParamsContract::DryExtensions::ValidationScope.enabled do
-          ActionParamsContract::Contracts.const_get(:"ConcurrentRootSchema#{index}", false).build_contract
+        described_class.around(outer_controller_instance) do
+          barrier.pop
+          outer = ActionParamsContract::Params.cast({ name: "outer-#{index}" })
+          inner = ActionParamsContract::Params.cast(
+            { code: index.to_s }, controller: ReentrantInnerController, action: :create
+          )
+          {
+            outer_name: outer["name"], inner_code: inner["code"],
+            controller_after: described_class.current_controller&.class,
+            action_after: described_class.current_action,
+          }
         end
-        { index:, root: store[root_key] }
-      ensure
-        store[root_key] = nil
       end
     end
 
-    it "isolates root :key per thread with no cross-pollution" do
-      barrier = Queue.new
-      thread_count.times { barrier << :go }
+    context "when a nested Params.cast runs inside a concurrent outer .around frame" do
+      it "preserves each thread's outer frame across a nested Params.cast call" do
+        barrier = Queue.new
+        thread_count.times { barrier << :go }
 
-      results = Array.new(thread_count) { |index| run_root_evaluation_thread(index, barrier) }.map(&:value)
+        results = Array.new(thread_count) { |index| run_reentrant_thread(index, barrier) }.map(&:value)
 
-      expect(results).to match_array(Array.new(thread_count) { |i| { index: i, root: :"object_#{i}" } })
+        expected = Array.new(thread_count) do |i|
+          {
+            outer_name: "outer-#{i}",
+            inner_code: i,
+            controller_after: ReentrantOuterController,
+            action_after: :create,
+          }
+        end
+
+        expect(results).to match_array(expected)
+      end
     end
   end
 end
