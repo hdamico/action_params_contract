@@ -6,13 +6,10 @@ module ActionParamsContract
       include ControllerActionDsl
 
       def root(key)
-        controller = ActionParamsContract::RequestContext.current_controller
-        return unless controller
-
-        existing = controller.instance_variable_get(:@params_object_root)
+        existing = ActionParamsContract::RequestContext.current_root
         raise ActionParamsContract::ConflictingRootError.new(existing, key) if existing && existing != key
 
-        controller.instance_variable_set(:@params_object_root, key)
+        ActionParamsContract::RequestContext.current_root = key
       end
     end
   end

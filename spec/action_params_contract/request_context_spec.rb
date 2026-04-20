@@ -167,6 +167,7 @@ RSpec.describe ActionParamsContract::RequestContext do
   end
 
   describe "Concurrent root :key evaluation" do
+    let(:root_key)     { described_class::ROOT_KEY }
     let(:thread_count) { 5 }
 
     before do
@@ -182,23 +183,21 @@ RSpec.describe ActionParamsContract::RequestContext do
       end
     end
 
-    after { store[controller_key] = nil }
+    after { store[root_key] = nil }
 
     def run_root_evaluation_thread(index, barrier)
       Thread.new do
-        controller = Object.new
-        store[controller_key] = controller
         barrier.pop
         ActionParamsContract::DryExtensions::ValidationScope.enabled do
           ActionParamsContract::Contracts.const_get(:"ConcurrentRootSchema#{index}", false).build_contract
         end
-        { index:, root: controller.instance_variable_get(:@params_object_root) }
+        { index:, root: store[root_key] }
       ensure
-        store[controller_key] = nil
+        store[root_key] = nil
       end
     end
 
-    it "isolates root :key per thread — each controller gets its own key with no cross-pollution" do
+    it "isolates root :key per thread with no cross-pollution" do
       barrier = Queue.new
       thread_count.times { barrier << :go }
 

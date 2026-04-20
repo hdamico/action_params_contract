@@ -178,14 +178,7 @@ RSpec.describe ActionParamsContract::DryExtensions do
   end
 
   describe "root DSL with duplicate declarations" do
-    let(:controller) { Object.new }
-
-    before do
-      stub_const("ActionParamsContract::Contracts::DuplicateRootSchema", Module.new)
-      ActionParamsContract::RequestContext.store[ActionParamsContract::RequestContext::CONTROLLER_KEY] = controller
-    end
-
-    after { ActionParamsContract::RequestContext.store[ActionParamsContract::RequestContext::CONTROLLER_KEY] = nil }
+    before { stub_const("ActionParamsContract::Contracts::DuplicateRootSchema", Module.new) }
 
     context "when the same key is declared twice" do
       it "is a no-op (idempotent)" do
@@ -217,25 +210,23 @@ RSpec.describe ActionParamsContract::DryExtensions do
     end
   end
 
-  describe "root DSL when no controller is in thread-local storage" do
+  describe "root DSL builds in isolation across separate contracts" do
     before do
-      stub_const("ActionParamsContract::Contracts::RootNoControllerSchema", Module.new)
-      ActionParamsContract::RequestContext.store[ActionParamsContract::RequestContext::CONTROLLER_KEY] = nil
+      stub_const("ActionParamsContract::Contracts::RootIsolationASchema", Module.new)
+      stub_const("ActionParamsContract::Contracts::RootIsolationBSchema", Module.new)
 
-      ActionParamsContract::ContractGenerator.call("RootNoControllerSchema") do
-        params do
-          root :ignored
-          optional(:anything).maybe(:string)
-        end
+      ActionParamsContract::ContractGenerator.call("RootIsolationASchema") do
+        params { root :one }
+      end
+      ActionParamsContract::ContractGenerator.call("RootIsolationBSchema") do
+        params { root :two }
       end
     end
 
-    after do
-      ActionParamsContract::RequestContext.store[ActionParamsContract::RequestContext::CONTROLLER_KEY] = nil
-    end
+    it "resets the root key per build so prior builds do not raise ConflictingRootError" do
+      ActionParamsContract::Contracts::RootIsolationASchema.build_contract
 
-    it "silently no-ops rather than raising a NoMethodError on nil" do
-      expect { ActionParamsContract::Contracts::RootNoControllerSchema.build_contract }.not_to raise_error
+      expect { ActionParamsContract::Contracts::RootIsolationBSchema.build_contract }.not_to raise_error
     end
   end
 end

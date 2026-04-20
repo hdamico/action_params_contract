@@ -132,21 +132,6 @@ RSpec.describe ActionParamsContract do
     end
   end
 
-  describe ".filtered_params" do
-    after { ActionParamsContract::RequestContext.pop }
-
-    context "when called outside a validated controller action" do
-      before { ActionParamsContract::RequestContext.pop }
-
-      it "raises a descriptive error" do
-        expect { described_class.filtered_params }.to raise_error(
-          ActionParamsContract::MissingRequestContextError,
-          /ActionParamsContract\.filtered_params must be called from within a validated controller action/
-        )
-      end
-    end
-  end
-
   describe ".params_errors" do
     after { ActionParamsContract::RequestContext.pop }
 
